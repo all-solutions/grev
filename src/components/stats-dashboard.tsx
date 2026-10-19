@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PLATFORM_NAMES, preparePlatformChartData } from "@/lib/platform-chart";
 import {
     Bar,
     BarChart,
@@ -142,18 +143,11 @@ export function StatsDashboard({
             }),
         [summary.repositories, sort, direction],
     );
-    const chartData = useMemo(() => {
-        const byRepo = new Map<string, Record<string, string | number>>();
-        for (const row of platforms) {
-            const entry = byRepo.get(row.repository) ?? {
-                repository: row.repository,
-            };
-            entry[row.platform] = row.total.downloads;
-            byRepo.set(row.repository, entry);
-        }
-        return [...byRepo.values()];
-    }, [platforms]);
-    const platformNames = ["Windows", "Linux", "macOS", "Android", "Other"];
+    const chartData = useMemo(
+        () => preparePlatformChartData(platforms),
+        [platforms],
+    );
+    const platformNames = PLATFORM_NAMES;
     const colors: Record<string, string> = {
         Windows: "#6366f1",
         Linux: "#22c55e",
@@ -429,15 +423,28 @@ export function StatsDashboard({
                                         }
                                     />
                                     <Tooltip
-                                        formatter={(value) => [
-                                            Number(value).toLocaleString(),
-                                            "Downloads",
-                                        ]}
+                                        formatter={(value, name, item) => {
+                                            const downloads = Number(value);
+                                            const complete =
+                                                item.payload?.[
+                                                    `${String(name)}Complete`
+                                                ] !== false;
+                                            return [
+                                                `${complete ? "" : "≥ "}${downloads.toLocaleString()}`,
+                                                String(name),
+                                            ];
+                                        }}
                                     />
-                                    <BarChartStack
-                                        names={platformNames}
-                                        colors={colors}
-                                    />
+                                    <Legend />
+                                    {platformNames.map((name) => (
+                                        <Bar
+                                            key={name}
+                                            name={name}
+                                            dataKey={name}
+                                            stackId="platform"
+                                            fill={colors[name]}
+                                        />
+                                    ))}
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -454,7 +461,7 @@ export function RepositoryPlatformChart({
     platforms: PlatformRow[];
 }) {
     const [metric, setMetric] = useState<"total" | "30d">("total");
-    const names = ["Windows", "Linux", "macOS", "Android", "Other"];
+    const names = PLATFORM_NAMES;
     const colors: Record<string, string> = {
         Windows: "#6366f1",
         Linux: "#22c55e",
@@ -462,14 +469,7 @@ export function RepositoryPlatformChart({
         Android: "#f59e0b",
         Other: "#a1a1aa",
     };
-    const row: Record<string, string | number> = {
-        repository: platforms[0]?.repository ?? "Repository",
-    };
-    for (const item of platforms)
-        row[item.platform] =
-            metric === "total"
-                ? item.total.downloads
-                : (item["30d"].downloads ?? 0);
+    const row = preparePlatformChartData(platforms, metric)[0];
     return (
         <Card>
             <CardHeader>
@@ -518,12 +518,28 @@ export function RepositoryPlatformChart({
                                     }
                                 />
                                 <Tooltip
-                                    formatter={(value, key) => [
-                                        Number(value).toLocaleString(),
-                                        key,
-                                    ]}
+                                    formatter={(value, name, item) => {
+                                        const downloads = Number(value);
+                                        const complete =
+                                            item.payload?.[
+                                                `${String(name)}Complete`
+                                            ] !== false;
+                                        return [
+                                            `${complete ? "" : "≥ "}${downloads.toLocaleString()}`,
+                                            String(name),
+                                        ];
+                                    }}
                                 />
-                                <BarChartStack names={names} colors={colors} />
+                                <Legend />
+                                {names.map((name) => (
+                                    <Bar
+                                        key={name}
+                                        name={name}
+                                        dataKey={name}
+                                        stackId="platform"
+                                        fill={colors[name]}
+                                    />
+                                ))}
                             </BarChart>
                         </ResponsiveContainer>
                     </div>
@@ -537,26 +553,6 @@ export function RepositoryPlatformChart({
     );
 }
 
-function BarChartStack({
-    names,
-    colors,
-}: {
-    names: string[];
-    colors: Record<string, string>;
-}) {
-    return (
-        <>
-            {names.map((name) => (
-                <Bar
-                    key={name}
-                    dataKey={name}
-                    stackId="platform"
-                    fill={colors[name]}
-                />
-            ))}
-        </>
-    );
-}
 function Mini({ label, value }: { label: string; value: string }) {
     return (
         <div>
