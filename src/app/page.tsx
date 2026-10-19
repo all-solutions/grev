@@ -1,16 +1,22 @@
-import { StatsDashboard } from "@/components/stats-dashboard";
-import db from "@/lib/monitor-db";
-import { getPlatformBreakdown, getSummary } from "@/lib/stats-core";
+import { DownloadOverview } from "@/components/download-overview";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-    title: "GREV · Release download monitor",
-    description:
-        "Historical download statistics for monitored GitHub releases.",
+    title: "GREV · Downloads",
+    description: "Download overview for all monitored GitHub repositories.",
 };
 
 export default function Home() {
-    const summary = getSummary(db);
-    const platforms = getPlatformBreakdown(db, undefined);
-    return <StatsDashboard summary={summary} platforms={platforms} />;
+    return (
+        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+            <div className="mb-6">
+                <h1 className="text-3xl font-bold">Downloads</h1>
+                <p className="mt-1 text-muted-foreground">
+                    Releases und Asset-Downloads deiner überwachten
+                    Repositories.
+                </p>
+            </div>
+            <DownloadOverview />
+        </main>
+    );
 }

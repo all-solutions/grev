@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { StoreProvider } from "@/components/providers/store-provider";
 import AuthProvider from "@/components/providers/auth-provider";
+import { MonitorNavigation } from "@/components/monitor-navigation";
 import { getSession } from "@/lib/auth";
 
 const outfitSans = Outfit({
@@ -142,6 +143,7 @@ export default async function RootLayout({
                             enableSystem
                             disableTransitionOnChange
                         >
+                            <MonitorNavigation />
                             {children}
                             <Toaster />
                         </ThemeProvider>
