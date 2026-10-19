@@ -1,5 +1,3 @@
-import "server-only";
-import { Octokit } from "octokit";
 import db from "./monitor-db";
 import { calculateDownloadDelta } from "./monitor-core";
 import { runCollector } from "./collector";
@@ -38,6 +36,7 @@ export function listRepositories(): Repository[] {
 }
 
 export async function verifyRepository(owner: string, name: string) {
+    const { Octokit } = await import("octokit");
     const octokit = new Octokit({
         auth: process.env.GITHUB_TOKEN,
         userAgent: "grev-monitor",
@@ -78,6 +77,7 @@ export function removeRepository(id: number) {
 export async function collectRepository(
     repositoryId?: number,
 ): Promise<{ processed: number; failed: number }> {
+    const { Octokit } = await import("octokit");
     const octokit = new Octokit({
         auth: process.env.GITHUB_TOKEN,
         userAgent: "grev-monitor",

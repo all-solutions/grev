@@ -1,4 +1,3 @@
-import "server-only";
 import Database from "better-sqlite3";
 import { openMonitorDatabase } from "./monitor-db-core";
 import { mkdirSync } from "node:fs";
