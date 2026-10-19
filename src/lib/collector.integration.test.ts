@@ -84,6 +84,7 @@ describe("collector SQLite integration", () => {
         ).toEqual([
             { version: "001_initial" },
             { version: "002_collector_lock" },
+            { version: "003_platform_overrides" },
         ]);
         if (process.platform !== "win32")
             expect(statSync(dbPath).mode & 0o777).toBe(0o600);

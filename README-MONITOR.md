@@ -1,4 +1,4 @@
-# GREV repository monitor (Phase 1)
+# GREV repository monitor (Phase 2)
 
 ## Architecture
 
@@ -37,9 +37,19 @@ Stop collector writes or use SQLite's backup API before copying the database. Wi
 
 For the planned HestiaCP deployment, provide the absolute persistent path through `GREV_DATABASE_PATH` and ensure user `local` can write its parent directory. The app creates new data directories with mode `0700` and the SQLite file with mode `0600`. Configure secrets in the service environment, not in the repository. Build and run the app on Node.js 24; keep the database outside the application release directory. HestiaCP, HAProxy, firewall, and systemd unit configuration are outside this project change. No additional public service is required.
 
-## Known Phase 1 limits / Phase 2
+## Phase 2 analytics
 
-The current admin token is a shared bearer credential; rotate it by changing the environment value. Browser clients cannot invoke admin routes without explicitly entering it. The dashboard currently shows repository poll state and supports per-repository polling; historical charts, arbitrary date-range aggregation APIs, account-level authorization, and nuanced attribution around GitHub counter resets/replaced assets are Phase 2 work. Delta calculations are conservative and use available samples only.
+The home page is the cross-repository analytics dashboard. `/explore` retains the original GREV release search, and `/repositories/:owner/:repo` provides repository history, release and asset details, plus platform summaries. The dashboard compares actual cumulative GitHub counters and observed snapshot intervals; it does not estimate values between polls.
+
+Period deltas use the last sample at or before the selected start as a baseline and compare it with samples through the end. Missing baselines and any counter decrease in the interval make that asset's period value unknown. Aggregate values sum known assets and expose `complete` and `unknownAssets`; a partial sum is shown as a lower bound. For time-series charts, each point belongs to the later sample timestamp and covers the full interval since its preceding sample. Missing or reset intervals remain gaps. Custom ranges are UTC and limited to ten years.
+
+Platform categories are Windows, Linux, macOS, Android, and Other. Automatic classification uses asset names and extensions; cross-platform archives default to Other. Admins can override a category on an asset detail page. Overrides are stored by GitHub asset ID in migration `003_platform_overrides.sql`; deleting an override restores automatic classification. Existing migration files are preserved and the migration runs automatically.
+
+Read-only analytics endpoints are `/api/stats/summary`, `/api/stats/repositories/:owner/:repo`, `/api/stats/releases/:id`, `/api/stats/assets/:id`, `/api/stats/timeseries`, and `/api/stats/platforms`. They accept optional period/range filters where applicable and return completeness metadata for download totals. Asset platform changes use `PATCH` or `DELETE /api/admin/assets/:id/platform`, protected by the same bearer token and same-origin checks as other admin routes.
+
+## Known limitations
+
+The current admin token remains a shared bearer credential; rotate it by changing the environment value. Browser clients cannot invoke admin routes without explicitly entering it. Historical attribution follows GitHub asset IDs; an asset replaced with a new ID starts a new series, and totals include the latest known cumulative counters for assets retained in the database, including assets later removed upstream. There is no account-level authorization or background web timer.
 
 ## Phase 1 QA review
 
