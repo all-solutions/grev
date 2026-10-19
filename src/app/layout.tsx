@@ -6,8 +6,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { StoreProvider } from "@/components/providers/store-provider";
 import AuthProvider from "@/components/providers/auth-provider";
 import { getSession } from "@/lib/auth";
-import { SpeedInsights } from "@vercel/speed-insights/next";
-import AnalyticsProvider from "@/components/providers/analytics-provider";
 
 const outfitSans = Outfit({
     variable: "--font-outfit-sans",
@@ -149,8 +147,6 @@ export default async function RootLayout({
                         </ThemeProvider>
                     </StoreProvider>
                 </AuthProvider>
-                <SpeedInsights />
-                <AnalyticsProvider />
             </body>
         </html>
     );
