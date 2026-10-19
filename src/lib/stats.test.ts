@@ -194,6 +194,56 @@ describe("SQLite statistics", () => {
         ]);
     });
 
+    it("requires a real prior snapshot for the first timeseries interval", () => {
+        const from = "2026-01-31T12:00:00.000Z";
+        seedAsset(releaseId, 1991, "new-linux.AppImage", [
+            ["2026-01-31T18:00:00.000Z", 5],
+            [now, 9],
+        ]);
+        expect(
+            getTimeseries(db, { assetId: 1991 }, from, now)[0].points,
+        ).toEqual([
+            {
+                timestamp: "2026-01-31T18:00:00.000Z",
+                intervalStart: null,
+                downloads: null,
+                unknown: true,
+            },
+            {
+                timestamp: now,
+                intervalStart: "2026-01-31T18:00:00.000Z",
+                downloads: 4,
+                unknown: false,
+            },
+        ]);
+
+        expect(
+            getTimeseries(db, { assetId: 1001 }, from, now)[0].points,
+        ).toEqual([
+            {
+                timestamp: now,
+                intervalStart: from,
+                downloads: 10,
+                unknown: false,
+            },
+        ]);
+
+        seedAsset(releaseId, 1992, "reset-win.exe", [
+            [from, 100],
+            ["2026-01-31T18:00:00.000Z", 2],
+        ]);
+        expect(
+            getTimeseries(db, { assetId: 1992 }, from, now)[0].points,
+        ).toEqual([
+            {
+                timestamp: "2026-01-31T18:00:00.000Z",
+                intervalStart: from,
+                downloads: null,
+                unknown: true,
+            },
+        ]);
+    });
+
     it("applies manual platform overrides and groups comparisons by repository/platform", () => {
         expect(classifyPlatform("TVHarbor-linux.AppImage")).toBe("Linux");
         expect(classifyPlatform("portable.zip")).toBe("Other");

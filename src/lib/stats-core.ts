@@ -468,19 +468,21 @@ export function getTimeseries(
     );
     return assets.map((asset) => {
         const history = samples.get(asset.db_asset_id) ?? [];
+        let previous = history.find((sample) => sample.timestamp <= from);
         const points = history
             .filter((sample) => sample.timestamp > from)
-            .map((sample, index) => {
-                const previous = history[index];
+            .map((sample) => {
+                const baseline = previous;
+                previous = sample;
                 const reset =
-                    !previous ||
-                    sample.download_count < previous.download_count;
+                    !baseline ||
+                    sample.download_count < baseline.download_count;
                 return {
                     timestamp: sample.timestamp,
-                    intervalStart: previous?.timestamp ?? null,
+                    intervalStart: baseline?.timestamp ?? null,
                     downloads: reset
                         ? null
-                        : sample.download_count - previous.download_count,
+                        : sample.download_count - baseline.download_count,
                     unknown: reset,
                 };
             });
