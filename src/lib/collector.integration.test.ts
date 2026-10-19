@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import type { Octokit } from "octokit";
 import { openMonitorDatabase } from "./monitor-db-core";
 import { runCollector } from "./collector";
@@ -85,6 +86,7 @@ describe("collector SQLite integration", () => {
             { version: "001_initial" },
             { version: "002_collector_lock" },
             { version: "003_platform_overrides" },
+            { version: "004_asset_package_type_overrides" },
         ]);
         if (process.platform !== "win32")
             expect(statSync(dbPath).mode & 0o777).toBe(0o600);
@@ -100,6 +102,85 @@ describe("collector SQLite integration", () => {
                 )
                 .run(),
         ).toThrow();
+    });
+
+    it("upgrades a Phase 2 database to migration 004 without changing stored history", () => {
+        database.close();
+        const legacyPath = join(tempRoot, "legacy.sqlite");
+        const existing = new Database(legacyPath);
+        existing.pragma("foreign_keys = ON");
+        existing.exec(
+            "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
+        );
+        for (const migration of [
+            "001_initial.sql",
+            "002_collector_lock.sql",
+            "003_platform_overrides.sql",
+        ]) {
+            existing.exec(
+                readFileSync(resolve("migrations", migration), "utf8"),
+            );
+            existing
+                .prepare(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                )
+                .run(migration.replace(/\.sql$/, ""), "2026-01-01T00:00:00Z");
+        }
+        const repoId = Number(
+            existing
+                .prepare(
+                    "INSERT INTO repositories(owner, name, enabled, created_at) VALUES ('TVHarbor', 'App', 1, '2026-01-01T00:00:00Z')",
+                )
+                .run().lastInsertRowid,
+        );
+        const releaseId = Number(
+            existing
+                .prepare(
+                    "INSERT INTO releases(repository_id, github_release_id, tag_name, prerelease, draft) VALUES (?, 987, 'beta-6', 1, 0)",
+                )
+                .run(repoId).lastInsertRowid,
+        );
+        const assetId = Number(
+            existing
+                .prepare(
+                    "INSERT INTO assets(release_id, github_asset_id, name, size, created_at, updated_at) VALUES (?, 654, 'tvharbor-portable.exe', 42, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                )
+                .run(releaseId).lastInsertRowid,
+        );
+        existing
+            .prepare(
+                "INSERT INTO snapshots(asset_id, timestamp, download_count) VALUES (?, '2026-01-02T00:00:00Z', 123)",
+            )
+            .run(assetId);
+        existing
+            .prepare(
+                "INSERT INTO asset_platform_overrides(github_asset_id, platform, updated_at) VALUES (654, 'Windows', '2026-01-01T00:00:00Z')",
+            )
+            .run();
+        existing.close();
+
+        database = openMonitorDatabase(legacyPath);
+        expect(
+            database
+                .prepare(
+                    "SELECT download_count FROM snapshots WHERE asset_id = ?",
+                )
+                .get(assetId),
+        ).toEqual({ download_count: 123 });
+        expect(
+            database
+                .prepare(
+                    "SELECT platform FROM asset_platform_overrides WHERE github_asset_id = 654",
+                )
+                .get(),
+        ).toEqual({ platform: "Windows" });
+        expect(
+            database
+                .prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asset_package_type_overrides'",
+                )
+                .get(),
+        ).toEqual({ name: "asset_package_type_overrides" });
     });
 
     it("walks every page, upserts by GitHub ID, and records only one snapshot per timestamp", async () => {

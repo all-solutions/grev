@@ -45,7 +45,27 @@ Period deltas use the last sample at or before the selected start as a baseline 
 
 Platform categories are Windows, Linux, macOS, Android, and Other. Automatic classification uses asset names and extensions; cross-platform archives default to Other. Admins can override a category on an asset detail page. Overrides are stored by GitHub asset ID in migration `003_platform_overrides.sql`; deleting an override restores automatic classification. Existing migration files are preserved and the migration runs automatically.
 
-Read-only analytics endpoints are `/api/stats/summary`, `/api/stats/repositories/:owner/:repo`, `/api/stats/releases/:id`, `/api/stats/assets/:id`, `/api/stats/timeseries`, and `/api/stats/platforms`. They accept optional period/range filters where applicable and return completeness metadata for download totals. Asset platform changes use `PATCH` or `DELETE /api/admin/assets/:id/platform`, protected by the same bearer token and same-origin checks as other admin routes.
+Read-only analytics endpoints are `/api/stats/summary`, `/api/stats/repositories/:owner/:repo`, `/api/stats/releases/:id`, `/api/stats/assets/:id`, `/api/stats/timeseries`, `/api/stats/platforms`, and `/api/stats/package-types`. They accept optional period/range filters where applicable and return completeness metadata for download totals. Asset platform and package type changes use their respective `PATCH` or `DELETE /api/admin/assets/:id/...` endpoints, protected by the same bearer token and same-origin checks as other admin routes.
+
+## Phase 2.1 package types
+
+Assets receive a package type from their effective platform (automatic detection or a platform override) and case-insensitive filename rules:
+
+| Platform | Detected package types                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows  | Portable (`portable` in the name), Installer (`setup`, `installer`, `.msi`, `.msix`, `.msixbundle`), Other (including unmarked `.exe`) |
+| Linux    | DEB, RPM, AppImage, Archive (`.tar.gz`, `.tar.xz`, `.tgz`), Other                                                                      |
+| macOS    | DMG, PKG, ZIP, Other                                                                                                                   |
+| Android  | APK, AAB, Other                                                                                                                        |
+| Other    | Other                                                                                                                                  |
+
+Classification is calculated for every stored asset without rewriting snapshots. New assets are classified on read. Admins can correct a type from an asset on the repository page and restore automatic detection later. Type overrides are stored by GitHub asset ID. Migration `004_asset_package_type_overrides.sql` adds the override table; migrations `001` through `003` and collector snapshot data are unchanged. On a manual platform change, an incompatible type override is removed in the same transaction; the package type is then recalculated under the new platform. All asset corrections use the existing bearer token and Origin checks.
+
+`GET /api/stats/package-types` reads only SQLite and accepts optional `repositoryId`, `releaseId`, `platform`, and comma-separated `assetIds` filters (up to 200 IDs). It returns totals and 24h/7d/30d metrics per repository/platform/type, asset counts, completeness metadata, and within-platform shares. Shares are exact percentages only when the package and platform totals are both complete and the denominator is nonzero. Missing baselines and counter resets keep a period incomplete by reusing the existing snapshot aggregation logic.
+
+The dashboard's **Package type comparison** starts with all monitored repositories and supports repository, platform, and period filters. Repository detail pages switch between **Platform breakdown** and **Package types**, where a platform, period, and all releases or one release can be selected. Partial numbers are marked as lower bounds; incomplete shares are displayed as `Incomplete`. Platform and package charts keep each Recharts `Bar` directly under its chart component.
+
+For an existing deployment, back up the SQLite database using the backup procedure above, deploy the application code through the normal release process, and let application startup apply migration `004` transactionally. The migration only creates an override table and does not alter assets or snapshots. Verify the database user can write to the configured data directory, then open the monitor and check package statistics. No collector run is required to classify existing stored assets. No server service or timer changes are part of this feature.
 
 ## Known limitations
 
@@ -57,4 +77,6 @@ The QA pass checks every adjacent snapshot pair for a counter decrease; if any r
 
 Collector writes are one transaction per repository after all its API pages have been fetched. A failed fetch therefore does not persist partial pages. A SQLite row serializes CLI and web-triggered collectors; a dead local PID is reclaimed after an interrupted process. SQLite busy timeout and WAL support concurrent web reads/writes. Error logs and browser-visible status use bounded generic messages; verbose legacy stored errors are hidden. The admin token is only held in component memory, sent as an Authorization header, and can be cleared with “Forget admin token”; there is no browser storage. Unsafe HTTP requests require same-host Origin or same-origin Fetch Metadata. Production database paths should point to the persistent data directory writable by `local`; newly created directories/files use modes 0700/0600.
 
-Last QA validation: `pnpm test` (14 tests), `pnpm typecheck`, `pnpm lint`, and `pnpm build` on Node.js 24 with pnpm 10.34.7. Lint passes with three pre-existing warnings in GREV UI files.
+Initial Phase 1 QA validation: `pnpm test` (14 tests), `pnpm typecheck`, `pnpm lint`, and `pnpm build` on Node.js 24 with pnpm 10.34.7. Lint passed with three pre-existing warnings in GREV UI files.
+
+Phase 2.1 validation: `pnpm test` (52 tests), `pnpm typecheck`, `pnpm lint`, and `pnpm build`. Lint passes with the same three pre-existing warnings; no runtime dependency was added.

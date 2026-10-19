@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PackageTypeComparison } from "@/components/package-type-charts";
 import { PLATFORM_NAMES, preparePlatformChartData } from "@/lib/platform-chart";
 import {
     Bar,
@@ -394,63 +395,88 @@ export function StatsDashboard({
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="h-[360px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart
-                                    data={chartData}
-                                    margin={{
-                                        top: 12,
-                                        right: 12,
-                                        left: 4,
-                                        bottom: 60,
-                                    }}
-                                >
-                                    <CartesianGrid
-                                        strokeDasharray="3 3"
-                                        vertical={false}
-                                    />
-                                    <XAxis
-                                        dataKey="repository"
-                                        angle={-30}
-                                        textAnchor="end"
-                                        interval={0}
-                                        height={70}
-                                        tick={{ fontSize: 11 }}
-                                    />
-                                    <YAxis
-                                        tickFormatter={(value: number) =>
-                                            value.toLocaleString()
-                                        }
-                                    />
-                                    <Tooltip
-                                        formatter={(value, name, item) => {
-                                            const downloads = Number(value);
-                                            const complete =
-                                                item.payload?.[
-                                                    `${String(name)}Complete`
-                                                ] !== false;
-                                            return [
-                                                `${complete ? "" : "≥ "}${downloads.toLocaleString()}`,
-                                                String(name),
-                                            ];
+                        <div className="w-full overflow-x-auto">
+                            <div
+                                className="h-[390px]"
+                                style={{
+                                    minWidth: Math.max(
+                                        640,
+                                        chartData.length * 120,
+                                    ),
+                                }}
+                            >
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart
+                                        data={chartData}
+                                        margin={{
+                                            top: 12,
+                                            right: 12,
+                                            left: 4,
+                                            bottom: 28,
                                         }}
-                                    />
-                                    <Legend />
-                                    {platformNames.map((name) => (
-                                        <Bar
-                                            key={name}
-                                            name={name}
-                                            dataKey={name}
-                                            stackId="platform"
-                                            fill={colors[name]}
+                                    >
+                                        <CartesianGrid
+                                            strokeDasharray="3 3"
+                                            vertical={false}
                                         />
-                                    ))}
-                                </BarChart>
-                            </ResponsiveContainer>
+                                        <XAxis
+                                            dataKey="repository"
+                                            interval={0}
+                                            height={38}
+                                            tickMargin={10}
+                                            tickFormatter={(value) =>
+                                                String(value)
+                                                    .split("/")
+                                                    .at(-1) ?? String(value)
+                                            }
+                                            tick={{ fontSize: 11 }}
+                                        />
+                                        <YAxis
+                                            tickFormatter={(value: number) =>
+                                                value.toLocaleString()
+                                            }
+                                        />
+                                        <Tooltip<number, string>
+                                            labelFormatter={(_label, payload) =>
+                                                payload?.[0]?.payload
+                                                    ?.repository ?? _label
+                                            }
+                                            formatter={(value, name, item) => {
+                                                const downloads = Number(value);
+                                                const complete =
+                                                    item.payload?.[
+                                                        `${String(name)}Complete`
+                                                    ] !== false;
+                                                return [
+                                                    `${complete ? "" : "≥ "}${downloads.toLocaleString()}`,
+                                                    String(name),
+                                                ];
+                                            }}
+                                        />
+                                        <Legend verticalAlign="bottom" />
+                                        {platformNames.map((name) => (
+                                            <Bar
+                                                key={name}
+                                                name={name}
+                                                dataKey={name}
+                                                stackId="platform"
+                                                fill={colors[name]}
+                                            />
+                                        ))}
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
             )}
+            <PackageTypeComparison
+                repositories={summary.repositories.map((repo) => ({
+                    id: repo.id,
+                    owner: repo.owner,
+                    name: repo.name,
+                }))}
+            />
         </div>
     );
 }
@@ -496,7 +522,7 @@ export function RepositoryPlatformChart({
             </CardHeader>
             <CardContent>
                 {platforms.length ? (
-                    <div className="h-[260px] w-full">
+                    <div className="h-[320px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart
                                 data={[row]}
@@ -504,7 +530,7 @@ export function RepositoryPlatformChart({
                                     top: 8,
                                     right: 10,
                                     left: 0,
-                                    bottom: 15,
+                                    bottom: 34,
                                 }}
                             >
                                 <CartesianGrid
@@ -517,7 +543,11 @@ export function RepositoryPlatformChart({
                                         value.toLocaleString()
                                     }
                                 />
-                                <Tooltip
+                                <Tooltip<number, string>
+                                    labelFormatter={(_label, payload) =>
+                                        payload?.[0]?.payload?.repository ??
+                                        _label
+                                    }
                                     formatter={(value, name, item) => {
                                         const downloads = Number(value);
                                         const complete =
@@ -530,7 +560,7 @@ export function RepositoryPlatformChart({
                                         ];
                                     }}
                                 />
-                                <Legend />
+                                <Legend verticalAlign="bottom" />
                                 {names.map((name) => (
                                     <Bar
                                         key={name}

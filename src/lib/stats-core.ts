@@ -1,5 +1,11 @@
 import type Database from "better-sqlite3";
-import { classifyPlatform, type Platform } from "./platform";
+import {
+    classifyPackageType,
+    classifyPlatform,
+    isPackageTypeForPlatform,
+    type PackageType,
+    type Platform,
+} from "./platform";
 
 export type WindowValue = {
     downloads: number | null;
@@ -10,6 +16,8 @@ export type WindowValue = {
 };
 export type AssetStat = {
     githubAssetId: number;
+    repositoryId: number;
+    repository: string;
     releaseId: number;
     releaseName: string;
     name: string;
@@ -19,6 +27,8 @@ export type AssetStat = {
     total: number | null;
     platform: Platform;
     override: boolean;
+    packageType: PackageType;
+    packageTypeOverride: boolean;
     periods: Record<"24h" | "7d" | "30d", WindowValue>;
 };
 
@@ -108,6 +118,7 @@ type RawAsset = {
     content_type: string | null;
     deleted_at: string | null;
     override_platform: Platform | null;
+    override_package_type: string | null;
 };
 type Sample = { asset_id: number; timestamp: string; download_count: number };
 
@@ -129,7 +140,7 @@ function loadAssets(db: Database.Database, scope: Scope): RawAsset[] {
     if (scope.enabledOnly) clauses.push("r.enabled = 1");
     return db
         .prepare(
-            `SELECT a.id AS db_asset_id, a.github_asset_id, rel.id AS release_id, r.id AS repository_id, r.owner, r.name AS repository, rel.tag_name, rel.name AS release_name, rel.published_at, a.name AS asset_name, a.size, a.content_type, a.deleted_at, o.platform AS override_platform FROM assets a JOIN releases rel ON rel.id = a.release_id JOIN repositories r ON r.id = rel.repository_id LEFT JOIN asset_platform_overrides o ON o.github_asset_id = a.github_asset_id ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY r.owner COLLATE NOCASE, r.name COLLATE NOCASE, rel.published_at, rel.id, a.name`,
+            `SELECT a.id AS db_asset_id, a.github_asset_id, rel.id AS release_id, r.id AS repository_id, r.owner, r.name AS repository, rel.tag_name, rel.name AS release_name, rel.published_at, a.name AS asset_name, a.size, a.content_type, a.deleted_at, o.platform AS override_platform, p.package_type AS override_package_type FROM assets a JOIN releases rel ON rel.id = a.release_id JOIN repositories r ON r.id = rel.repository_id LEFT JOIN asset_platform_overrides o ON o.github_asset_id = a.github_asset_id LEFT JOIN asset_package_type_overrides p ON p.github_asset_id = a.github_asset_id ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY r.owner COLLATE NOCASE, r.name COLLATE NOCASE, rel.published_at, rel.id, a.name`,
         )
         .all(...params) as RawAsset[];
 }
@@ -416,8 +427,13 @@ function makeAssetStatsFromSamples(
         const latest = history.at(-1);
         const platform =
             asset.override_platform ?? classifyPlatform(asset.asset_name);
+        const validPackageOverride =
+            asset.override_package_type !== null &&
+            isPackageTypeForPlatform(platform, asset.override_package_type);
         return {
             githubAssetId: asset.github_asset_id,
+            repositoryId: asset.repository_id,
+            repository: `${asset.owner}/${asset.repository}`,
             releaseId: asset.release_id,
             releaseName: asset.release_name ?? asset.tag_name,
             name: asset.asset_name,
@@ -427,6 +443,10 @@ function makeAssetStatsFromSamples(
             total: latest?.download_count ?? null,
             platform,
             override: asset.override_platform !== null,
+            packageType: validPackageOverride
+                ? (asset.override_package_type as PackageType)
+                : classifyPackageType(platform, asset.asset_name),
+            packageTypeOverride: validPackageOverride,
             periods: {
                 "24h": summarizeWindow(history, from24, now),
                 "7d": summarizeWindow(history, from7, now),
@@ -563,6 +583,125 @@ export function getPlatformBreakdown(
             group.assets.map((asset) => asset.periods["30d"]),
         ),
     }));
+}
+
+export type PackageTypeFilters = {
+    repositoryId?: number;
+    releaseId?: number;
+    platform?: Platform;
+    assetIds?: number[];
+};
+
+export function getPackageTypeBreakdown(
+    db: Database.Database,
+    filters: PackageTypeFilters = {},
+    now = new Date().toISOString(),
+) {
+    const scope = getScopeStats(
+        db,
+        {
+            repositoryId: filters.repositoryId,
+            releaseId: filters.releaseId,
+            enabledOnly: filters.repositoryId === undefined,
+        },
+        now,
+    );
+    const requestedAssets = filters.assetIds ? new Set(filters.assetIds) : null;
+    const assets = (scope?.assets ?? []).filter(
+        (asset) =>
+            (!filters.platform || asset.platform === filters.platform) &&
+            (!requestedAssets || requestedAssets.has(asset.githubAssetId)),
+    );
+    const groups = new Map<string, AssetStat[]>();
+    const byPlatform = new Map<string, AssetStat[]>();
+    for (const asset of assets) {
+        const groupKey = `${asset.repositoryId}:${asset.platform}:${asset.packageType}`;
+        groups.set(groupKey, [...(groups.get(groupKey) ?? []), asset]);
+        const platformKey = `${asset.repositoryId}:${asset.platform}`;
+        byPlatform.set(platformKey, [
+            ...(byPlatform.get(platformKey) ?? []),
+            asset,
+        ]);
+    }
+    const periodKeys = ["24h", "7d", "30d"] as const;
+    const platformTotals = new Map<string, ReturnType<typeof aggregateTotal>>();
+    const platformPeriods = new Map<
+        string,
+        Record<(typeof periodKeys)[number], WindowValue>
+    >();
+    for (const [platformKey, platformAssets] of byPlatform) {
+        platformTotals.set(platformKey, aggregateTotal(platformAssets));
+        platformPeriods.set(
+            platformKey,
+            Object.fromEntries(
+                periodKeys.map((period) => [
+                    period,
+                    combineWindows(
+                        platformAssets.map((asset) => asset.periods[period]),
+                    ),
+                ]),
+            ) as Record<(typeof periodKeys)[number], WindowValue>,
+        );
+    }
+    return [...groups.entries()].map(([key, groupAssets]) => {
+        const [repositoryId, platform, packageType] = key.split(":") as [
+            string,
+            Platform,
+            PackageType,
+        ];
+        const platformKey = `${repositoryId}:${platform}`;
+        const total = aggregateTotal(groupAssets);
+        const periods = Object.fromEntries(
+            periodKeys.map((period) => [
+                period,
+                combineWindows(
+                    groupAssets.map((asset) => asset.periods[period]),
+                ),
+            ]),
+        ) as Record<(typeof periodKeys)[number], WindowValue>;
+        const platformTotal = platformTotals.get(platformKey)!;
+        const platformWindows = platformPeriods.get(platformKey)!;
+        return {
+            repositoryId: groupAssets[0].repositoryId,
+            repository: groupAssets[0].repository,
+            platform,
+            packageType,
+            assetCount: groupAssets.length,
+            total,
+            periods,
+            share: {
+                total: calculateShare(total, platformTotal),
+                "24h": calculateShare(periods["24h"], platformWindows["24h"]),
+                "7d": calculateShare(periods["7d"], platformWindows["7d"]),
+                "30d": calculateShare(periods["30d"], platformWindows["30d"]),
+            },
+        };
+    });
+}
+
+function aggregateTotal(assets: AssetStat[]) {
+    const known = assets.filter((asset) => asset.total !== null);
+    return {
+        downloads: known.reduce((sum, asset) => sum + asset.total!, 0),
+        complete: known.length === assets.length,
+        unknownAssets: assets.length - known.length,
+    };
+}
+
+function calculateShare(
+    part: { downloads: number | null; complete: boolean },
+    whole: { downloads: number | null; complete: boolean },
+) {
+    const complete =
+        part.complete &&
+        whole.complete &&
+        part.downloads !== null &&
+        whole.downloads !== null &&
+        whole.downloads > 0;
+    return {
+        percent: complete ? (part.downloads! / whole.downloads!) * 100 : null,
+        complete,
+    };
 }
 
 function shift(iso: string, milliseconds: number) {

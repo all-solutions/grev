@@ -18,6 +18,10 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
+    PackageTypeCorrection,
+    RepositoryPackageTypeChart,
+} from "@/components/package-type-charts";
+import {
     DownloadTrendChart,
     PlatformCorrection,
     RepositoryPlatformChart,
@@ -40,6 +44,8 @@ type Asset = {
     total: number | null;
     platform: string;
     override: boolean;
+    packageType: string;
+    packageTypeOverride: boolean;
     periods: Record<"24h" | "7d" | "30d", WindowMetric>;
 };
 type Release = {
@@ -108,6 +114,12 @@ export function RepositoryStatistics({
         repository.releases[0]?.id ?? null,
     );
     const [editingAsset, setEditingAsset] = useState<number | null>(null);
+    const [editingPackageAsset, setEditingPackageAsset] = useState<
+        number | null
+    >(null);
+    const [distributionView, setDistributionView] = useState<
+        "platform" | "package"
+    >("platform");
     const releases = repository.releases;
     const selected =
         releases.find((release) => release.id === selectedRelease) ??
@@ -192,7 +204,49 @@ export function RepositoryStatistics({
                 releases={chartReleases}
                 assets={repository.assets}
             />
-            <RepositoryPlatformChart platforms={repository.platforms} />
+            <section className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        variant={
+                            distributionView === "platform"
+                                ? "default"
+                                : "secondary"
+                        }
+                        onClick={() => setDistributionView("platform")}
+                    >
+                        Platform breakdown
+                    </Button>
+                    <Button
+                        variant={
+                            distributionView === "package"
+                                ? "default"
+                                : "secondary"
+                        }
+                        onClick={() => setDistributionView("package")}
+                    >
+                        Package types
+                    </Button>
+                </div>
+                {distributionView === "platform" ? (
+                    <RepositoryPlatformChart platforms={repository.platforms} />
+                ) : (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Package types</CardTitle>
+                            <CardDescription>
+                                Compare package downloads across this repository
+                                or select one release.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <RepositoryPackageTypeChart
+                                repositoryId={repository.id}
+                                releases={chartReleases}
+                            />
+                        </CardContent>
+                    </Card>
+                )}
+            </section>
 
             <Card>
                 <CardHeader>
@@ -296,6 +350,11 @@ export function RepositoryStatistics({
                                                     {asset.override
                                                         ? " · manual"
                                                         : " · detected"}
+                                                    Â· Package:{" "}
+                                                    {asset.packageType}
+                                                    {asset.packageTypeOverride
+                                                        ? " (manual)"
+                                                        : " (detected)"}
                                                     {asset.deletedAt
                                                         ? ` · deleted ${date(asset.deletedAt)}`
                                                         : ""}
@@ -355,7 +414,7 @@ export function RepositoryStatistics({
                                             {editingAsset ===
                                             asset.githubAssetId
                                                 ? "Close platform editor"
-                                                : "Correct platform category"}
+                                                : "Correct platform"}
                                         </Button>
                                         {editingAsset ===
                                             asset.githubAssetId && (
@@ -363,6 +422,45 @@ export function RepositoryStatistics({
                                                 assetId={asset.githubAssetId}
                                                 initialPlatform={asset.platform}
                                                 isOverride={asset.override}
+                                            />
+                                        )}
+                                        <Button
+                                            variant="link"
+                                            size="sm"
+                                            className="mt-2 h-auto px-0"
+                                            onClick={() =>
+                                                setEditingPackageAsset(
+                                                    editingPackageAsset ===
+                                                        asset.githubAssetId
+                                                        ? null
+                                                        : asset.githubAssetId,
+                                                )
+                                            }
+                                        >
+                                            {editingPackageAsset ===
+                                            asset.githubAssetId
+                                                ? "Close package type editor"
+                                                : "Correct package type"}
+                                        </Button>
+                                        {editingPackageAsset ===
+                                            asset.githubAssetId && (
+                                            <PackageTypeCorrection
+                                                key={`${asset.githubAssetId}-${asset.platform}`}
+                                                assetId={asset.githubAssetId}
+                                                platform={
+                                                    asset.platform as
+                                                        | "Windows"
+                                                        | "Linux"
+                                                        | "macOS"
+                                                        | "Android"
+                                                        | "Other"
+                                                }
+                                                initialPackageType={
+                                                    asset.packageType
+                                                }
+                                                isOverride={
+                                                    asset.packageTypeOverride
+                                                }
                                             />
                                         )}
                                     </article>

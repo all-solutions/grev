@@ -7,6 +7,7 @@ import {
     combineWindows,
     getAssetStats,
     getPlatformBreakdown,
+    getPackageTypeBreakdown,
     getReleaseStats,
     getRepositoryStats,
     getSummary,
@@ -14,7 +15,11 @@ import {
     summarizeWindow,
 } from "./stats-core";
 import { classifyPlatform } from "./platform";
-import { parsePositiveInteger, parseTimeRange } from "./stats-query";
+import {
+    parsePackageTypeFilters,
+    parsePositiveInteger,
+    parseTimeRange,
+} from "./stats-query";
 
 let root: string;
 let db: ReturnType<typeof openMonitorDatabase>;
@@ -254,6 +259,8 @@ describe("SQLite statistics", () => {
         expect(getAssetStats(db, 1002, now)).toMatchObject({
             platform: "Android",
             override: true,
+            packageType: "Other",
+            packageTypeOverride: false,
         });
         expect(
             getPlatformBreakdown(db, undefined, now).some(
@@ -261,6 +268,125 @@ describe("SQLite statistics", () => {
                     entry.platform === "Android" && entry.total.downloads === 8,
             ),
         ).toBe(true);
+    });
+
+    it("aggregates package types across assets/releases and keeps incomplete shares unknown", () => {
+        const secondRelease = Number(
+            db
+                .prepare(
+                    "INSERT INTO releases(repository_id, github_release_id, tag_name, published_at, prerelease, draft) VALUES (?, 902, 'v2', '2026-01-30T00:00:00Z', 0, 0)",
+                )
+                .run(repoId).lastInsertRowid,
+        );
+        seedAsset(secondRelease, 2001, "app-portable.exe", [
+            ["2026-01-31T12:00:00.000Z", 10],
+            [now, 20],
+        ]);
+        seedAsset(secondRelease, 2004, "another-portable.exe", [
+            ["2026-01-31T12:00:00.000Z", 1],
+            [now, 4],
+        ]);
+        seedAsset(secondRelease, 2002, "app.deb", [[now, 40]]);
+        db.prepare(
+            "INSERT INTO asset_package_type_overrides(github_asset_id, package_type, updated_at) VALUES (1001, 'Portable', ?)",
+        ).run(now);
+
+        const stats = getPackageTypeBreakdown(
+            db,
+            { repositoryId: repoId },
+            now,
+        );
+        expect(stats).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    repositoryId: repoId,
+                    platform: "Windows",
+                    packageType: "Portable",
+                    assetCount: 3,
+                    total: { downloads: 134, complete: true, unknownAssets: 0 },
+                    share: expect.objectContaining({
+                        total: { percent: expect.any(Number), complete: true },
+                    }),
+                }),
+                expect.objectContaining({
+                    platform: "Linux",
+                    packageType: "DEB",
+                    total: { downloads: 40, complete: true, unknownAssets: 0 },
+                    periods: {
+                        "24h": expect.objectContaining({
+                            downloads: 0,
+                            complete: false,
+                        }),
+                        "7d": expect.objectContaining({
+                            downloads: 0,
+                            complete: false,
+                        }),
+                        "30d": expect.objectContaining({
+                            downloads: 0,
+                            complete: false,
+                        }),
+                    },
+                    share: expect.objectContaining({
+                        "30d": { percent: null, complete: false },
+                    }),
+                }),
+            ]),
+        );
+        expect(
+            getPackageTypeBreakdown(
+                db,
+                {
+                    repositoryId: repoId,
+                    releaseId: secondRelease,
+                    platform: "Windows",
+                },
+                now,
+            ),
+        ).toHaveLength(1);
+        expect(
+            getPackageTypeBreakdown(
+                db,
+                { repositoryId: repoId, assetIds: [2001] },
+                now,
+            ),
+        ).toHaveLength(1);
+
+        seedAsset(releaseId, 2003, "reset.rpm", [
+            ["2026-01-31T12:00:00.000Z", 100],
+            [now, 5],
+        ]);
+        const resetType = getPackageTypeBreakdown(
+            db,
+            { repositoryId: repoId, platform: "Linux" },
+            now,
+        ).find((entry) => entry.packageType === "RPM");
+        expect(resetType?.periods["24h"]).toMatchObject({
+            downloads: 0,
+            complete: false,
+            unknownAssets: 1,
+        });
+        expect(resetType?.share["24h"]).toEqual({
+            percent: null,
+            complete: false,
+        });
+    });
+
+    it("uses compatible package overrides and falls back when platform changes", () => {
+        db.prepare(
+            "INSERT INTO asset_package_type_overrides(github_asset_id, package_type, updated_at) VALUES (1002, 'Portable', ?)",
+        ).run(now);
+        expect(getAssetStats(db, 1002, now)).toMatchObject({
+            packageType: "Portable",
+            packageTypeOverride: true,
+        });
+        db.prepare(
+            "INSERT INTO asset_platform_overrides(github_asset_id, platform, updated_at) VALUES (1002, 'Android', ?) ON CONFLICT(github_asset_id) DO UPDATE SET platform = excluded.platform",
+        ).run(now);
+        expect(getAssetStats(db, 1002, now)).toMatchObject({
+            platform: "Android",
+            packageType: "Other",
+            packageTypeOverride: false,
+        });
     });
 
     it("returns unknown for periods without a baseline or a later observation", () => {
@@ -310,5 +436,25 @@ describe("statistics query validation", () => {
         expect(parsePositiveInteger("12", "id")).toBe(12);
         expect(parsePositiveInteger("-1", "id")).toHaveProperty("error");
         expect(parsePositiveInteger("1.2", "id")).toHaveProperty("error");
+    });
+    it("validates package type API filters", () => {
+        expect(
+            parsePackageTypeFilters(
+                new URLSearchParams(
+                    "repositoryId=2&releaseId=3&platform=Linux&assetIds=8,9",
+                ),
+            ),
+        ).toEqual({
+            repositoryId: 2,
+            releaseId: 3,
+            platform: "Linux",
+            assetIds: [8, 9],
+        });
+        expect(
+            parsePackageTypeFilters(new URLSearchParams("platform=Solaris")),
+        ).toHaveProperty("error");
+        expect(
+            parsePackageTypeFilters(new URLSearchParams("assetIds=1,nope")),
+        ).toHaveProperty("error");
     });
 });

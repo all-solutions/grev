@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import db from "@/lib/monitor-db";
 import { authorizeAdmin } from "@/lib/admin-auth";
-import { PLATFORMS } from "@/lib/platform";
+import {
+    PLATFORMS,
+    classifyPlatform,
+    isPackageTypeForPlatform,
+} from "@/lib/platform";
 
 export const runtime = "nodejs";
 
@@ -28,17 +32,31 @@ export async function PATCH(
             { error: "Invalid platform." },
             { status: 400 },
         );
-    const exists = db
-        .prepare("SELECT 1 FROM assets WHERE github_asset_id = ?")
-        .get(id);
-    if (!exists)
+    const asset = db
+        .prepare(
+            "SELECT a.name, p.package_type FROM assets a LEFT JOIN asset_package_type_overrides p ON p.github_asset_id = a.github_asset_id WHERE a.github_asset_id = ?",
+        )
+        .get(id) as { name: string; package_type: string | null } | undefined;
+    if (!asset)
         return NextResponse.json(
             { error: "Asset not found." },
             { status: 404 },
         );
-    db.prepare(
-        "INSERT INTO asset_platform_overrides(github_asset_id, platform, updated_at) VALUES (?, ?, ?) ON CONFLICT(github_asset_id) DO UPDATE SET platform = excluded.platform, updated_at = excluded.updated_at",
-    ).run(id, body.platform, new Date().toISOString());
+    db.transaction(() => {
+        db.prepare(
+            "INSERT INTO asset_platform_overrides(github_asset_id, platform, updated_at) VALUES (?, ?, ?) ON CONFLICT(github_asset_id) DO UPDATE SET platform = excluded.platform, updated_at = excluded.updated_at",
+        ).run(id, body.platform, new Date().toISOString());
+        if (
+            asset.package_type &&
+            !isPackageTypeForPlatform(
+                body.platform as (typeof PLATFORMS)[number],
+                asset.package_type,
+            )
+        )
+            db.prepare(
+                "DELETE FROM asset_package_type_overrides WHERE github_asset_id = ?",
+            ).run(id);
+    })();
     return NextResponse.json({ ok: true });
 }
 
@@ -54,8 +72,28 @@ export async function DELETE(
             { error: "Invalid asset id." },
             { status: 400 },
         );
-    db.prepare(
-        "DELETE FROM asset_platform_overrides WHERE github_asset_id = ?",
-    ).run(id);
+    const asset = db
+        .prepare(
+            "SELECT a.name, p.package_type FROM assets a LEFT JOIN asset_package_type_overrides p ON p.github_asset_id = a.github_asset_id WHERE a.github_asset_id = ?",
+        )
+        .get(id) as { name: string; package_type: string | null } | undefined;
+    if (!asset)
+        return NextResponse.json(
+            { error: "Asset not found." },
+            { status: 404 },
+        );
+    const inferredPlatform = classifyPlatform(asset.name);
+    db.transaction(() => {
+        db.prepare(
+            "DELETE FROM asset_platform_overrides WHERE github_asset_id = ?",
+        ).run(id);
+        if (
+            asset.package_type &&
+            !isPackageTypeForPlatform(inferredPlatform, asset.package_type)
+        )
+            db.prepare(
+                "DELETE FROM asset_package_type_overrides WHERE github_asset_id = ?",
+            ).run(id);
+    })();
     return NextResponse.json({ ok: true });
 }

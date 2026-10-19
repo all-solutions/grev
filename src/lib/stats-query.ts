@@ -1,3 +1,5 @@
+import { PLATFORMS, type Platform } from "./platform";
+
 export type TimeRange = { from: string; to: string; period: string };
 const durations: Record<string, number> = {
     "24h": 86400000,
@@ -64,4 +66,46 @@ export function parsePositiveInteger(
     if (!Number.isSafeInteger(parsed) || parsed < 1)
         return { error: `${name} must be a positive integer.` };
     return parsed;
+}
+export type PackageTypeQueryFilters = {
+    repositoryId?: number;
+    releaseId?: number;
+    platform?: Platform;
+    assetIds?: number[];
+};
+
+export function parsePackageTypeFilters(
+    params: URLSearchParams,
+): PackageTypeQueryFilters | { error: string } {
+    const result: PackageTypeQueryFilters = {};
+    for (const key of ["repositoryId", "releaseId"] as const) {
+        const parsed = parsePositiveInteger(params.get(key), key);
+        if (parsed && typeof parsed !== "number") return parsed;
+        if (typeof parsed === "number") result[key] = parsed;
+    }
+    const platform = params.get("platform");
+    if (platform) {
+        if (!PLATFORMS.includes(platform as Platform))
+            return { error: "platform is not a supported platform." };
+        result.platform = platform as Platform;
+    }
+    const assetIds = params.get("assetIds");
+    if (assetIds !== null) {
+        const values = assetIds.split(",");
+        if (
+            !values.length ||
+            values.length > 200 ||
+            values.some((value) => !/^\d+$/.test(value))
+        )
+            return {
+                error: "assetIds must contain up to 200 positive integers.",
+            };
+        const parsed = values.map(Number);
+        if (parsed.some((value) => !Number.isSafeInteger(value) || value < 1))
+            return {
+                error: "assetIds must contain up to 200 positive integers.",
+            };
+        result.assetIds = [...new Set(parsed)];
+    }
+    return result;
 }
